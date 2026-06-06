@@ -16,18 +16,33 @@ pub struct CollectedOutputs {
 pub struct SshClient {
     login_host: String,
     username: String,
-    key_path: std::path::PathBuf,
+    auth: SshAuth,
     known_hosts_path: std::path::PathBuf,
     strict_host_key_checking: bool,
+}
+
+enum SshAuth {
+    PrivateKey(std::path::PathBuf),
+    Password(std::path::PathBuf),
 }
 
 impl SshClient {
     pub fn new(login_host: &str, credential: &HpcCredential, workspace: &JobWorkspace) -> Self {
         let strict_host_key_checking = !credential.spec.known_hosts.trim().is_empty();
+        let auth = if credential
+            .spec
+            .private_key
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            SshAuth::PrivateKey(workspace.private_key_path())
+        } else {
+            SshAuth::Password(workspace.password_path())
+        };
         Self {
             login_host: login_host.to_string(),
             username: credential.spec.username.clone(),
-            key_path: workspace.private_key_path(),
+            auth,
             known_hosts_path: workspace.known_hosts_path(),
             strict_host_key_checking,
         }
@@ -173,22 +188,38 @@ impl SshClient {
     }
 
     fn base_ssh_command(&self) -> Command {
-        let mut command = Command::new("ssh");
-        self.add_ssh_options(&mut command);
+        let mut command = match &self.auth {
+            SshAuth::PrivateKey(_) => Command::new("ssh"),
+            SshAuth::Password(password_path) => {
+                let mut command = Command::new("sshpass");
+                command.arg("-f").arg(password_path).arg("ssh");
+                command
+            }
+        };
+        self.add_ssh_options(&mut command, false);
         command
     }
 
     fn base_scp_command(&self) -> Command {
-        let mut command = Command::new("scp");
-        self.add_ssh_options(&mut command);
+        let mut command = match &self.auth {
+            SshAuth::PrivateKey(_) => Command::new("scp"),
+            SshAuth::Password(password_path) => {
+                let mut command = Command::new("sshpass");
+                command.arg("-f").arg(password_path).arg("scp");
+                command
+            }
+        };
+        self.add_ssh_options(&mut command, true);
         command
     }
 
-    fn add_ssh_options(&self, command: &mut Command) {
+    fn add_ssh_options(&self, command: &mut Command, scp: bool) {
+        if let SshAuth::PrivateKey(key_path) = &self.auth {
+            command.arg("-i").arg(key_path);
+        }
+        let option_flag = if scp { "-o" } else { "-o" };
         command
-            .arg("-i")
-            .arg(&self.key_path)
-            .arg("-o")
+            .arg(option_flag)
             .arg(format!(
                 "StrictHostKeyChecking={}",
                 if self.strict_host_key_checking {
@@ -197,7 +228,7 @@ impl SshClient {
                     "accept-new"
                 }
             ))
-            .arg("-o")
+            .arg(option_flag)
             .arg(format!(
                 "UserKnownHostsFile={}",
                 self.known_hosts_path.display()

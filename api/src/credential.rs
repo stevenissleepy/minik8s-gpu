@@ -16,8 +16,14 @@ pub struct HpcCredential {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HpcCredentialSpec {
     pub username: String,
-    #[serde(rename = "privateKey")]
-    pub private_key: String,
+    #[serde(
+        rename = "privateKey",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub private_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
     #[serde(rename = "knownHosts", default)]
     pub known_hosts: String,
 }
@@ -55,8 +61,20 @@ impl Validatable for HpcCredential {
         if self.spec.username.trim().is_empty() {
             return Err(anyhow!("hpccredential spec.username is required"));
         }
-        if self.spec.private_key.trim().is_empty() {
-            return Err(anyhow!("hpccredential spec.privateKey is required"));
+        let has_private_key = self
+            .spec
+            .private_key
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        let has_password = self
+            .spec
+            .password
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_private_key && !has_password {
+            return Err(anyhow!(
+                "hpccredential spec.privateKey or spec.password is required"
+            ));
         }
         Ok(())
     }

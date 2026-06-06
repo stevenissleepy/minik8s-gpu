@@ -42,6 +42,10 @@ impl JobWorkspace {
         self.ssh_dir.join("known_hosts")
     }
 
+    pub fn password_path(&self) -> PathBuf {
+        self.ssh_dir.join("password")
+    }
+
     pub async fn write_sources(&self, gpujob: &GpuJob) -> Result<()> {
         for file in &gpujob.spec.source.files {
             let path = safe_child_path(&self.root, &file.path)?;
@@ -64,9 +68,26 @@ impl JobWorkspace {
     }
 
     pub async fn write_ssh_files(&self, credential: &HpcCredential) -> Result<()> {
-        let private_key = self.private_key_path();
-        tokio::fs::write(&private_key, &credential.spec.private_key).await?;
-        set_mode(&private_key, "0600").await?;
+        if let Some(private_key_content) = credential
+            .spec
+            .private_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let private_key = self.private_key_path();
+            tokio::fs::write(&private_key, private_key_content).await?;
+            set_mode(&private_key, "0600").await?;
+        }
+        if let Some(password) = credential
+            .spec
+            .password
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let password_path = self.password_path();
+            tokio::fs::write(&password_path, password).await?;
+            set_mode(&password_path, "0600").await?;
+        }
         if !credential.spec.known_hosts.trim().is_empty() {
             tokio::fs::write(self.known_hosts_path(), &credential.spec.known_hosts).await?;
         }
