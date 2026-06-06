@@ -71,6 +71,9 @@ pub fn render_script(gpujob: &GpuJob) -> String {
         format!("#SBATCH --gres={}", spec.gres),
         format!("#SBATCH --time={}", spec.time),
     ];
+    if let Some(account) = spec.account.as_deref().filter(|value| !value.is_empty()) {
+        lines.push(format!("#SBATCH --account={account}"));
+    }
     if let Some(qos) = spec.qos.as_deref().filter(|value| !value.is_empty()) {
         lines.push(format!("#SBATCH --qos={qos}"));
     }

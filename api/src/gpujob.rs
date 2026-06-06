@@ -41,6 +41,8 @@ pub struct HpcSpec {
 pub struct SlurmSpec {
     pub partition: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qos: Option<String>,
     #[serde(default = "default_one")]
     pub nodes: u32,
@@ -223,12 +225,21 @@ impl Validatable for GpuJob {
         if self.spec.slurm.partition.trim().is_empty() {
             return Err(anyhow!("gpujob spec.slurm.partition is required"));
         }
+        validate_plain_slurm_value(&self.spec.slurm.partition, "gpujob spec.slurm.partition")?;
+        if let Some(account) = self.spec.slurm.account.as_deref() {
+            validate_plain_slurm_value(account, "gpujob spec.slurm.account")?;
+        }
+        if let Some(qos) = self.spec.slurm.qos.as_deref() {
+            validate_plain_slurm_value(qos, "gpujob spec.slurm.qos")?;
+        }
         if self.spec.slurm.gres.trim().is_empty() {
             return Err(anyhow!("gpujob spec.slurm.gres is required"));
         }
+        validate_plain_slurm_value(&self.spec.slurm.gres, "gpujob spec.slurm.gres")?;
         if self.spec.slurm.time.trim().is_empty() {
             return Err(anyhow!("gpujob spec.slurm.time is required"));
         }
+        validate_plain_slurm_value(&self.spec.slurm.time, "gpujob spec.slurm.time")?;
         if self.spec.slurm.nodes == 0
             || self.spec.slurm.ntasks_per_node == 0
             || self.spec.slurm.cpus_per_task == 0
@@ -262,6 +273,13 @@ fn validate_relative_path(path: &str, field: &str) -> Result<()> {
         return Err(anyhow!(
             "{field} must be a relative path inside the job workspace"
         ));
+    }
+    Ok(())
+}
+
+fn validate_plain_slurm_value(value: &str, field: &str) -> Result<()> {
+    if value.contains('\n') || value.contains('\r') {
+        return Err(anyhow!("{field} must not contain newlines"));
     }
     Ok(())
 }
