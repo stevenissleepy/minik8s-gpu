@@ -1,0 +1,268 @@
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+#include <cuda_runtime.h>
+
+#define CUDA_CHECK(call)                                                     \
+    do {                                                                     \
+        cudaError_t err = (call);                                             \
+        if (err != cudaSuccess) {                                             \
+            std::fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__,          \
+                         __LINE__, cudaGetErrorString(err));                 \
+            std::exit(1);                                                     \
+        }                                                                    \
+    } while (0)
+
+constexpr int TILE = 16;
+
+__global__ void fill_qkv(float *q, float *k, float *v, int total) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= total) {
+        return;
+    }
+    q[i] = static_cast<float>((i * 13) % 101) / 101.0f - 0.5f;
+    k[i] = static_cast<float>((i * 17) % 103) / 103.0f - 0.5f;
+    v[i] = static_cast<float>((i * 19) % 107) / 107.0f - 0.5f;
+}
+
+__global__ void qk_tiled_kernel(const float *q, const float *k, float *scores,
+                                int batches, int heads, int seq_len, int head_dim) {
+    __shared__ float tile_q[TILE][TILE];
+    __shared__ float tile_k[TILE][TILE];
+
+    int row = blockIdx.y * TILE + threadIdx.y;
+    int col = blockIdx.x * TILE + threadIdx.x;
+    int bh = blockIdx.z;
+    int rows_per_bh = seq_len;
+    int qkv_offset = bh * rows_per_bh * head_dim;
+    int score_offset = bh * seq_len * seq_len;
+    float scale = rsqrtf(static_cast<float>(head_dim));
+    float sum = 0.0f;
+
+    for (int tile = 0; tile < head_dim; tile += TILE) {
+        int q_col = tile + threadIdx.x;
+        int k_col = tile + threadIdx.y;
+        tile_q[threadIdx.y][threadIdx.x] =
+            (row < seq_len && q_col < head_dim) ? q[qkv_offset + row * head_dim + q_col] : 0.0f;
+        tile_k[threadIdx.y][threadIdx.x] =
+            (col < seq_len && k_col < head_dim) ? k[qkv_offset + col * head_dim + k_col] : 0.0f;
+        __syncthreads();
+
+        #pragma unroll
+        for (int i = 0; i < TILE; ++i) {
+            sum += tile_q[threadIdx.y][i] * tile_k[i][threadIdx.x];
+        }
+        __syncthreads();
+    }
+
+    if (row < seq_len && col < seq_len) {
+        scores[score_offset + row * seq_len + col] = sum * scale;
+    }
+}
+
+__global__ void softmax_rows_kernel(float *scores, int total_rows, int seq_len) {
+    extern __shared__ float scratch[];
+    int row = blockIdx.x;
+    int tid = threadIdx.x;
+    if (row >= total_rows) {
+        return;
+    }
+    float *base = scores + row * seq_len;
+
+    float local_max = -INFINITY;
+    for (int i = tid; i < seq_len; i += blockDim.x) {
+        local_max = fmaxf(local_max, base[i]);
+    }
+    scratch[tid] = local_max;
+    __syncthreads();
+
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            scratch[tid] = fmaxf(scratch[tid], scratch[tid + stride]);
+        }
+        __syncthreads();
+    }
+    float row_max = scratch[0];
+
+    float local_sum = 0.0f;
+    for (int i = tid; i < seq_len; i += blockDim.x) {
+        float value = expf(base[i] - row_max);
+        base[i] = value;
+        local_sum += value;
+    }
+    scratch[tid] = local_sum;
+    __syncthreads();
+
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            scratch[tid] += scratch[tid + stride];
+        }
+        __syncthreads();
+    }
+    float row_sum = scratch[0];
+
+    for (int i = tid; i < seq_len; i += blockDim.x) {
+        base[i] /= row_sum;
+    }
+}
+
+__global__ void av_tiled_kernel(const float *attn, const float *v, float *out,
+                                int batches, int heads, int seq_len, int head_dim) {
+    __shared__ float tile_attn[TILE][TILE];
+    __shared__ float tile_v[TILE][TILE];
+
+    int row = blockIdx.y * TILE + threadIdx.y;
+    int dim = blockIdx.x * TILE + threadIdx.x;
+    int bh = blockIdx.z;
+    int score_offset = bh * seq_len * seq_len;
+    int qkv_offset = bh * seq_len * head_dim;
+    float sum = 0.0f;
+
+    for (int tile = 0; tile < seq_len; tile += TILE) {
+        int attn_col = tile + threadIdx.x;
+        int v_row = tile + threadIdx.y;
+        tile_attn[threadIdx.y][threadIdx.x] =
+            (row < seq_len && attn_col < seq_len) ? attn[score_offset + row * seq_len + attn_col] : 0.0f;
+        tile_v[threadIdx.y][threadIdx.x] =
+            (v_row < seq_len && dim < head_dim) ? v[qkv_offset + v_row * head_dim + dim] : 0.0f;
+        __syncthreads();
+
+        #pragma unroll
+        for (int i = 0; i < TILE; ++i) {
+            sum += tile_attn[threadIdx.y][i] * tile_v[i][threadIdx.x];
+        }
+        __syncthreads();
+    }
+
+    if (row < seq_len && dim < head_dim) {
+        out[qkv_offset + row * head_dim + dim] = sum;
+    }
+}
+
+float cpu_reference_one(const std::vector<float> &q, const std::vector<float> &k,
+                        const std::vector<float> &v, int seq_len, int head_dim,
+                        int row, int dim) {
+    std::vector<float> scores(seq_len);
+    float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+    float max_score = -INFINITY;
+    for (int col = 0; col < seq_len; ++col) {
+        float sum = 0.0f;
+        for (int d = 0; d < head_dim; ++d) {
+            sum += q[row * head_dim + d] * k[col * head_dim + d];
+        }
+        scores[col] = sum * scale;
+        max_score = std::max(max_score, scores[col]);
+    }
+    float denom = 0.0f;
+    for (float &score : scores) {
+        score = std::exp(score - max_score);
+        denom += score;
+    }
+    float output = 0.0f;
+    for (int col = 0; col < seq_len; ++col) {
+        output += (scores[col] / denom) * v[col * head_dim + dim];
+    }
+    return output;
+}
+
+int main(int argc, char **argv) {
+    int batches = argc > 1 ? std::atoi(argv[1]) : 2;
+    int heads = argc > 2 ? std::atoi(argv[2]) : 4;
+    int seq_len = argc > 3 ? std::atoi(argv[3]) : 256;
+    int head_dim = argc > 4 ? std::atoi(argv[4]) : 64;
+    int repeats = argc > 5 ? std::atoi(argv[5]) : 10;
+    if (batches <= 0 || heads <= 0 || seq_len <= 0 || head_dim <= 0 || repeats <= 0) {
+        std::fprintf(stderr, "usage: %s [batches] [heads] [seq_len] [head_dim] [repeats]\n", argv[0]);
+        return 2;
+    }
+    if (head_dim % TILE != 0) {
+        std::fprintf(stderr, "head_dim must be a multiple of %d\n", TILE);
+        return 2;
+    }
+
+    int device_count = 0;
+    CUDA_CHECK(cudaGetDeviceCount(&device_count));
+    if (device_count == 0) {
+        std::fprintf(stderr, "no CUDA device found\n");
+        return 3;
+    }
+    cudaDeviceProp prop{};
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+
+    int bh = batches * heads;
+    size_t qkv_total = static_cast<size_t>(bh) * seq_len * head_dim;
+    size_t score_total = static_cast<size_t>(bh) * seq_len * seq_len;
+    float *q = nullptr;
+    float *k = nullptr;
+    float *v = nullptr;
+    float *scores = nullptr;
+    float *out = nullptr;
+    CUDA_CHECK(cudaMalloc(&q, qkv_total * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&k, qkv_total * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&v, qkv_total * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&scores, score_total * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&out, qkv_total * sizeof(float)));
+
+    int threads = 256;
+    int init_blocks = static_cast<int>((qkv_total + threads - 1) / threads);
+    fill_qkv<<<init_blocks, threads>>>(q, k, v, static_cast<int>(qkv_total));
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    dim3 block(TILE, TILE);
+    dim3 qk_grid((seq_len + TILE - 1) / TILE, (seq_len + TILE - 1) / TILE, bh);
+    dim3 av_grid((head_dim + TILE - 1) / TILE, (seq_len + TILE - 1) / TILE, bh);
+    int softmax_threads = 256;
+    int total_rows = bh * seq_len;
+
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+    CUDA_CHECK(cudaEventRecord(start));
+    for (int i = 0; i < repeats; ++i) {
+        qk_tiled_kernel<<<qk_grid, block>>>(q, k, scores, batches, heads, seq_len, head_dim);
+        softmax_rows_kernel<<<total_rows, softmax_threads, softmax_threads * sizeof(float)>>>(scores, total_rows, seq_len);
+        av_tiled_kernel<<<av_grid, block>>>(scores, v, out, batches, heads, seq_len, head_dim);
+    }
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
+
+    float elapsed_ms = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
+    double qk_ops = 2.0 * static_cast<double>(bh) * seq_len * seq_len * head_dim;
+    double av_ops = 2.0 * static_cast<double>(bh) * seq_len * seq_len * head_dim;
+    double gflops = (qk_ops + av_ops) * repeats / (static_cast<double>(elapsed_ms) * 1.0e6);
+
+    std::vector<float> h_q(seq_len * head_dim);
+    std::vector<float> h_k(seq_len * head_dim);
+    std::vector<float> h_v(seq_len * head_dim);
+    std::vector<float> h_out(3);
+    CUDA_CHECK(cudaMemcpy(h_q.data(), q, h_q.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_k.data(), k, h_k.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_v.data(), v, h_v.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_out.data(), out, h_out.size() * sizeof(float), cudaMemcpyDeviceToHost));
+
+    float ref0 = cpu_reference_one(h_q, h_k, h_v, seq_len, head_dim, 0, 0);
+    float abs_error = std::fabs(ref0 - h_out[0]);
+    float checksum = h_out[0] + h_out[1] + h_out[2];
+
+    std::printf("CUDA attention demo OK\n");
+    std::printf("device=%s\n", prop.name);
+    std::printf("batches=%d heads=%d seq_len=%d head_dim=%d repeats=%d\n",
+                batches, heads, seq_len, head_dim, repeats);
+    std::printf("elapsed_ms=%.3f effective_gflops=%.2f checksum=%.6f cpu_abs_error=%.8f\n",
+                elapsed_ms, gflops, checksum, abs_error);
+
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
+    CUDA_CHECK(cudaFree(q));
+    CUDA_CHECK(cudaFree(k));
+    CUDA_CHECK(cudaFree(v));
+    CUDA_CHECK(cudaFree(scores));
+    CUDA_CHECK(cudaFree(out));
+    return abs_error < 1.0e-3f ? 0 : 4;
+}
