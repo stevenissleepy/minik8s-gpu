@@ -37,6 +37,7 @@ pub(crate) fn runner_pod(gpujob: &GpuJob, config: &ControllerConfig) -> Pod {
             ..ObjectMeta::default()
         },
         spec: PodSpec {
+            host_network: true,
             restart_policy: Some("Never".to_string()),
             node_selector: control_plane_selector(),
             tolerations: control_plane_toleration(),
