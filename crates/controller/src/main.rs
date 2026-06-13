@@ -3,7 +3,6 @@ mod runner_pod;
 mod status;
 
 use anyhow::{Context, Result};
-use apimachinery::Resource;
 use clap::Parser;
 use client_rs::{Client, InformerEvent, ListParams, TypedApi, WorkQueue, spawn_informer};
 use gpu_plugin_api::GpuJob;
@@ -82,13 +81,6 @@ async fn run() -> Result<()> {
     }
 
     let mut queue = WorkQueue::default();
-    queue.extend(
-        informer
-            .store
-            .items()
-            .into_iter()
-            .map(|gpujob| gpujob.object_ref()),
-    );
 
     loop {
         while let Ok(key) = rx.try_recv() {
