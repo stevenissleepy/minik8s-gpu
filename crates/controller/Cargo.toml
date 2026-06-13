@@ -9,12 +9,12 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-api = { path = "../../../lib/api" }
-apimachinery = { path = "../../../lib/apimachinery" }
+api = { path = "../../../../lib/api" }
+apimachinery = { path = "../../../../lib/apimachinery" }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-client-rs = { path = "../../../lib/client-rs" }
+client-rs = { path = "../../../../lib/client-rs" }
 gpu-plugin-api = { path = "../api" }
-logger = { path = "../../../lib/logger" }
+logger = { path = "../../../../lib/logger" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing = "0.1"
