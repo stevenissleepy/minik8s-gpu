@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../../../.."
 
-image_ref="${IMAGE_REF:-minik8s/gpujob-runner:latest}"
+image_ref="${IMAGE_REF:-stevenissleepy/gpujob-runner:latest}"
 
 cargo build --release -p gpujob-runner
 docker build -t "${image_ref}" -f- . <<'DOCKERFILE'

@@ -30,8 +30,8 @@ bash crates/plugin/gpu/scripts/build-runner-image.sh
 默认镜像名：
 
 ```text
-minik8s/gpu-plugin-controller:latest
-minik8s/gpujob-runner:latest
+stevenissleepy/gpu-plugin-controller:latest
+stevenissleepy/gpujob-runner:latest
 ```
 
 可以用 `IMAGE_REF` 覆盖单个脚本的目标镜像。
@@ -47,7 +47,7 @@ kubectl get crds
 kubectl get pods -n kube-system -o wide
 ```
 
-`deploy/gpu-plugin-controller.yaml` 默认把 controller 固定到 control-plane，并使用 `minik8s/gpujob-runner:latest` 创建 runner Pod。
+`deploy/gpu-plugin-controller.yaml` 默认把 controller 固定到 control-plane，并使用 `stevenissleepy/gpujob-runner:latest` 创建 runner Pod。
 
 ## 凭据
 
