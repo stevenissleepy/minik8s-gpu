@@ -40,19 +40,19 @@ kubectl apply -f /tmp/hpccred-sjtu.yaml
 kubectl get hpccredentials
 ```
 
-## 提交 CUDA Attention 示例
+## 提交 CUDA 矩阵示例
 
 ```sh
-kubectl apply -f crates/plugin/gpu/examples/attention-demo/gpujob-attention.yaml
+kubectl apply -f crates/plugin/gpu/examples/matrix-demo/gpujob-matrix.yaml
 kubectl get gpujobs -A
-kubectl get pods -l gpujob.minik8s.io/name=gpu-attention -o wide
+kubectl get pods -l gpujob.minik8s.io/name=gpu-matrix -o wide
 ```
 
 关注 `GPUJob.status`：
 
 ```sh
 export MINIK8S_APISERVER='http://127.0.0.1:8080'
-curl -s "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/gpujobs/gpu-attention" | jq .status
+curl -s "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/gpujobs/gpu-matrix" | jq .status
 ```
 
 关键字段：
@@ -64,6 +64,8 @@ status:
   message:
   runnerPod:
   slurmJobId:
+  submittedTime:
+  queryCommand:
   slurmState:
   exitCode:
   stdoutTail:
@@ -74,14 +76,14 @@ status:
 任务完成后，如果 runner 拉回了输出文件，会创建结果 ConfigMap：
 
 ```sh
-kubectl get configmap gpujob-gpu-attention-result
-curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-attention-result" | jq .data
+kubectl get configmap gpujob-gpu-matrix-result
+curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-matrix-result" | jq .data
 ```
 
 ## 清理
 
 ```sh
-curl -s -X DELETE "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/gpujobs/gpu-attention"
+curl -s -X DELETE "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/gpujobs/gpu-matrix"
 curl -s -X DELETE "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/hpccredentials/sjtu-hpc"
 rm -f /tmp/hpccred-sjtu.yaml
 ```
@@ -97,4 +99,4 @@ rm -f /tmp/hpccred-sjtu.yaml
 | Slurm 超时 | `Failed` | `TimeLimitExceeded` |
 | Slurm 取消 | `Cancelled` | `Cancelled` |
 
-如果 `GPUJob.status.slurmState` 长时间是 `PENDING`，并且 `message` 中出现 `AssocGrpGRES`，说明任务已经提交到交我算，但被 Slurm 账号或 association 的 GPU GRES 配额限制挡住；这不是 Minik8s 上传或状态回写失败。
+如果 `GPUJob.status.slurmState` 长时间是 `PENDING`，`kubectl get gpujobs -A` 应输出 pending 状态、Slurm 任务 ID、提交时间和查询命令；如果 `message` 中出现 `AssocGrpGRES`，说明任务已经提交到交我算，但被 Slurm 账号或 association 的 GPU GRES 配额限制挡住；这不是 Minik8s 上传或状态回写失败。

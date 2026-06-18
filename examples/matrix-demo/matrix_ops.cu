@@ -1,0 +1,160 @@
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cuda_runtime.h>
+
+#define CUDA_CHECK(call)                                                     \
+    do {                                                                     \
+        cudaError_t err = (call);                                             \
+        if (err != cudaSuccess) {                                             \
+            std::fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__,          \
+                         __LINE__, cudaGetErrorString(err));                 \
+            std::exit(1);                                                     \
+        }                                                                    \
+    } while (0)
+
+constexpr int TILE = 16;
+
+__global__ void fill_matrix(float *a, float *b, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = n * n;
+    if (i >= total) {
+        return;
+    }
+    a[i] = static_cast<float>((i * 13) % 97) / 97.0f;
+    b[i] = static_cast<float>((i * 17) % 89) / 89.0f;
+}
+
+__global__ void matrix_add_kernel(const float *a, const float *b, float *c, int total) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < total) {
+        c[i] = a[i] + b[i];
+    }
+}
+
+__global__ void matrix_mul_kernel(const float *a, const float *b, float *c, int n) {
+    __shared__ float tile_a[TILE][TILE];
+    __shared__ float tile_b[TILE][TILE];
+
+    int row = blockIdx.y * TILE + threadIdx.y;
+    int col = blockIdx.x * TILE + threadIdx.x;
+    float sum = 0.0f;
+
+    for (int tile = 0; tile < n; tile += TILE) {
+        int a_col = tile + threadIdx.x;
+        int b_row = tile + threadIdx.y;
+        tile_a[threadIdx.y][threadIdx.x] = (row < n && a_col < n) ? a[row * n + a_col] : 0.0f;
+        tile_b[threadIdx.y][threadIdx.x] = (b_row < n && col < n) ? b[b_row * n + col] : 0.0f;
+        __syncthreads();
+
+        #pragma unroll
+        for (int i = 0; i < TILE; ++i) {
+            sum += tile_a[threadIdx.y][i] * tile_b[i][threadIdx.x];
+        }
+        __syncthreads();
+    }
+
+    if (row < n && col < n) {
+        c[row * n + col] = sum;
+    }
+}
+
+float cpu_mul_one(const float *a, const float *b, int n, int row, int col) {
+    float sum = 0.0f;
+    for (int k = 0; k < n; ++k) {
+        sum += a[row * n + k] * b[k * n + col];
+    }
+    return sum;
+}
+
+int main(int argc, char **argv) {
+    int n = argc > 1 ? std::atoi(argv[1]) : 512;
+    int repeats = argc > 2 ? std::atoi(argv[2]) : 20;
+    if (n <= 0 || repeats <= 0) {
+        std::fprintf(stderr, "usage: %s [matrix_size] [repeats]\n", argv[0]);
+        return 2;
+    }
+
+    int device_count = 0;
+    CUDA_CHECK(cudaGetDeviceCount(&device_count));
+    if (device_count == 0) {
+        std::fprintf(stderr, "no CUDA device found\n");
+        return 3;
+    }
+    cudaDeviceProp prop{};
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+
+    int total = n * n;
+    size_t bytes = static_cast<size_t>(total) * sizeof(float);
+    float *a = nullptr;
+    float *b = nullptr;
+    float *add_out = nullptr;
+    float *mul_out = nullptr;
+    CUDA_CHECK(cudaMalloc(&a, bytes));
+    CUDA_CHECK(cudaMalloc(&b, bytes));
+    CUDA_CHECK(cudaMalloc(&add_out, bytes));
+    CUDA_CHECK(cudaMalloc(&mul_out, bytes));
+
+    int threads = 256;
+    int blocks = (total + threads - 1) / threads;
+    fill_matrix<<<blocks, threads>>>(a, b, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    dim3 block(TILE, TILE);
+    dim3 grid((n + TILE - 1) / TILE, (n + TILE - 1) / TILE);
+
+    cudaEvent_t start;
+    cudaEvent_t stop;
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+    CUDA_CHECK(cudaEventRecord(start));
+    for (int i = 0; i < repeats; ++i) {
+        matrix_add_kernel<<<blocks, threads>>>(a, b, add_out, total);
+        matrix_mul_kernel<<<grid, block>>>(a, b, mul_out, n);
+    }
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
+
+    float elapsed_ms = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
+    double add_ops = static_cast<double>(total);
+    double mul_ops = 2.0 * static_cast<double>(n) * n * n;
+    double gflops = (add_ops + mul_ops) * repeats / (static_cast<double>(elapsed_ms) * 1.0e6);
+
+    float h_a0 = 0.0f;
+    float h_b0 = 0.0f;
+    float h_add0 = 0.0f;
+    float h_mul0 = 0.0f;
+    CUDA_CHECK(cudaMemcpy(&h_a0, a, sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&h_b0, b, sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&h_add0, add_out, sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&h_mul0, mul_out, sizeof(float), cudaMemcpyDeviceToHost));
+
+    float *h_a = static_cast<float *>(std::malloc(bytes));
+    float *h_b = static_cast<float *>(std::malloc(bytes));
+    CUDA_CHECK(cudaMemcpy(h_a, a, bytes, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_b, b, bytes, cudaMemcpyDeviceToHost));
+    float ref_add0 = h_a0 + h_b0;
+    float ref_mul0 = cpu_mul_one(h_a, h_b, n, 0, 0);
+    float add_error = std::fabs(ref_add0 - h_add0);
+    float mul_error = std::fabs(ref_mul0 - h_mul0);
+
+    std::printf("CUDA matrix demo OK\n");
+    std::printf("device=%s\n", prop.name);
+    std::printf("matrix_size=%d repeats=%d\n", n, repeats);
+    std::printf("add_c00=%.6f mul_c00=%.6f add_error=%.8f mul_error=%.8f\n",
+                h_add0, h_mul0, add_error, mul_error);
+    std::printf("elapsed_ms=%.3f effective_gflops=%.2f\n", elapsed_ms, gflops);
+
+    std::free(h_a);
+    std::free(h_b);
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
+    CUDA_CHECK(cudaFree(a));
+    CUDA_CHECK(cudaFree(b));
+    CUDA_CHECK(cudaFree(add_out));
+    CUDA_CHECK(cudaFree(mul_out));
+    return add_error < 1.0e-6f && mul_error < 1.0e-2f ? 0 : 4;
+}

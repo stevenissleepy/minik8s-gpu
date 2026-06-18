@@ -47,7 +47,10 @@ pub(crate) async fn reconcile_gpujob(
         Err(error) => return Err(error.into()),
     }
 
-    if gpujob.status.runner_pod != pod_name || matches!(gpujob.status.phase, GpuJobPhase::Pending) {
+    if gpujob.status.runner_pod != pod_name
+        || (matches!(gpujob.status.phase, GpuJobPhase::Pending)
+            && gpujob.status.slurm_job_id.is_empty())
+    {
         mark_runner_pod(client, &namespace, &gpujob, &pod_name).await?;
     }
 

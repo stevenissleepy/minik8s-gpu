@@ -17,6 +17,25 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: SlurmState
+          type: string
+          jsonPath: .status.slurmState
+        - name: SlurmJobId
+          type: string
+          jsonPath: .status.slurmJobId
+        - name: Submitted
+          type: date
+          jsonPath: .status.submittedTime
+        - name: Query
+          type: string
+          jsonPath: .status.queryCommand
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
       subresources:
         status: {}
 ---

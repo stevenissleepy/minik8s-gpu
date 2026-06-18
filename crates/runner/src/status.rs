@@ -37,6 +37,8 @@ pub async fn submitted(
     status.message = "submitted Slurm job".to_string();
     status.slurm_job_id = slurm_job_id.to_string();
     status.remote_work_dir = remote_work_dir.to_string();
+    status.submitted_time = Some(Utc::now());
+    status.query_command = format!("squeue -j {slurm_job_id}");
     status.last_probe_time = Some(Utc::now());
     if status.start_time.is_none() {
         status.start_time = Some(Utc::now());
@@ -52,9 +54,19 @@ pub async fn running(
 ) -> Result<()> {
     let mut status = current_status(client, namespace, gpujob).await?;
     merge_slurm(&mut status, slurm);
-    status.phase = GpuJobPhase::Running;
+    status.phase = if slurm.state == "PENDING" {
+        GpuJobPhase::Pending
+    } else {
+        GpuJobPhase::Running
+    };
     status.message = if slurm.reason_or_node.is_empty() {
-        "Slurm job running".to_string()
+        if slurm.state == "PENDING" {
+            "Slurm job pending".to_string()
+        } else {
+            "Slurm job running".to_string()
+        }
+    } else if slurm.state == "PENDING" {
+        format!("Slurm job pending: {}", slurm.reason_or_node)
     } else {
         format!("Slurm job running: {}", slurm.reason_or_node)
     };
@@ -161,6 +173,9 @@ async fn current_status(client: &Client, namespace: &str, gpujob: &GpuJob) -> Re
 fn merge_slurm(status: &mut GpuJobStatus, slurm: &SlurmJobStatus) {
     status.slurm_job_id = slurm.job_id.clone();
     status.slurm_state = slurm.state.clone();
+    if !slurm.job_id.is_empty() && status.query_command.is_empty() {
+        status.query_command = format!("squeue -j {}", slurm.job_id);
+    }
     status.elapsed = slurm.elapsed.clone();
     status.time_limit = slurm.time_limit.clone();
     status.exit_code = slurm.exit_code.clone();

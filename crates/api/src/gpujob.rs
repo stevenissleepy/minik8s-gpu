@@ -167,6 +167,18 @@ pub struct GpuJobStatus {
     #[serde(rename = "startTime", default, skip_serializing_if = "Option::is_none")]
     pub start_time: Option<DateTime<Utc>>,
     #[serde(
+        rename = "submittedTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub submitted_time: Option<DateTime<Utc>>,
+    #[serde(
+        rename = "queryCommand",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub query_command: String,
+    #[serde(
         rename = "completionTime",
         default,
         skip_serializing_if = "Option::is_none"
