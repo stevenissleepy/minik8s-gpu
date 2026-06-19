@@ -19,8 +19,9 @@ kubectl get gpujobs -A
 Get returned output:
 
 ```bash
-kubectl get configmap gpujob-gpu-matrix-result -o yaml
-curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-matrix-result" | jq .data
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix --all
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix -o json
 ```
 
 The CUDA program uses GPU concurrency by launching many thread blocks:

@@ -85,11 +85,10 @@ kubectl get pods -l gpujob.minik8s.io/name=gpu-matrix -o wide
 查看状态和结果：
 
 ```sh
-export MINIK8S_APISERVER='http://127.0.0.1:8080'
 kubectl get gpujobs -A
-curl -s "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/gpujobs/gpu-matrix" | jq .status
-kubectl get configmap gpujob-gpu-matrix-result -o yaml
-curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-matrix-result" | jq .data
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix --all
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix -o json
 ```
 
 CUDA 程序代码路径：
@@ -199,25 +198,18 @@ kubectl get pods -l component=gpujob-runner -A
 任务完成后，runner 会把 Slurm 输出文件写入结果 ConfigMap：
 
 ```sh
-kubectl get configmap gpujob-gpu-matrix-result
-kubectl get configmap gpujob-gpu-matrix-result -o yaml
-curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-matrix-result" | jq .data
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix --all
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix -o json
 ```
 
 只看 stdout/stderr：
 
 ```sh
-SLURM_JOB_ID="$(curl -s "$MINIK8S_APISERVER/apis/gpu.minik8s.io/v1alpha1/namespaces/default/gpujobs/gpu-matrix" \
-  | jq -r '.status.slurmJobId')"
-
-curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-matrix-result" \
-  | jq -r --arg key "${SLURM_JOB_ID}.out" '.data[$key] // empty'
-
-curl -s "$MINIK8S_APISERVER/api/v1/namespaces/default/configmaps/gpujob-gpu-matrix-result" \
-  | jq -r --arg key "${SLURM_JOB_ID}.err" '.data[$key] // empty'
+bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
 ```
 
-实际 ConfigMap key 会按收集到的文件名生成，默认是 `<slurmJobId>.out` 和 `<slurmJobId>.err`；如果上面 stdout/stderr 命令没有输出，直接查看 `jq .data` 的 key。
+实际 ConfigMap key 会按收集到的文件名生成，默认是 `<slurmJobId>.out` 和 `<slurmJobId>.err`；GPU 插件结果查询脚本会自动读取 GPUJob status 中的 `resultConfigMap` 并提取对应输出。
 
 ### 9. pending 状态排查
 
