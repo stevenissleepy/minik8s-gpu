@@ -9,8 +9,8 @@
 ## 安装插件
 
 ```sh
-kubectl apply -f crates/plugin/gpu/deploy/gpu-crds.yaml
-kubectl apply -f crates/plugin/gpu/deploy/gpu-plugin-controller.yaml
+kubectl apply -f deploy/gpu-crds.yaml
+kubectl apply -f deploy/gpu-plugin-controller.yaml
 kubectl get crds
 kubectl get pods -n kube-system -o wide
 ```
@@ -43,7 +43,7 @@ kubectl get hpccredentials
 ## 提交 CUDA 矩阵示例
 
 ```sh
-kubectl apply -f crates/plugin/gpu/examples/matrix-demo/gpujob-matrix.yaml
+kubectl apply -f examples/matrix-demo/gpujob-matrix.yaml
 kubectl get gpujobs -A
 kubectl get pods -l gpujob.minik8s.io/name=gpu-matrix -o wide
 ```

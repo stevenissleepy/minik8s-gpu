@@ -12,16 +12,16 @@ Files:
 Submit through Minik8s:
 
 ```bash
-kubectl apply -f crates/plugin/gpu/examples/matrix-demo/gpujob-matrix.yaml
+kubectl apply -f examples/matrix-demo/gpujob-matrix.yaml
 kubectl get gpujobs -A
 ```
 
 Get returned output:
 
 ```bash
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix --all
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix -o json
+bash scripts/kubectl-gpu-result gpu-matrix
+bash scripts/kubectl-gpu-result gpu-matrix --all
+bash scripts/kubectl-gpu-result gpu-matrix -o json
 ```
 
 The CUDA program uses GPU concurrency by launching many thread blocks:

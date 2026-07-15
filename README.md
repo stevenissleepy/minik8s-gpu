@@ -1,5 +1,8 @@
 # Minik8s GPU Plugin
 
+这是一个独立的 Minik8s 扩展仓库。Rust workspace 通过固定 Git commit 依赖
+Minik8s 的 API、客户端和基础类型，因此不要求与 Minik8s 源码放在相邻目录。
+
 GPU 插件通过 CRD 提供 `GPUJob` 和 `HPCCredential`，由 `gpu-plugin-controller` 为每个 `GPUJob` 创建独立 runner Pod。runner 会把源码上传到交我算，执行 `sbatch`，轮询 `squeue` / `sacct`，并把状态和结果写回 Minik8s。
 
 ## 目录结构
@@ -24,8 +27,8 @@ cargo check -p gpujob-runner
 构建并推送默认镜像：
 
 ```sh
-bash crates/plugin/gpu/scripts/build-controller-image.sh
-bash crates/plugin/gpu/scripts/build-runner-image.sh
+bash scripts/build-controller-image.sh
+bash scripts/build-runner-image.sh
 ```
 
 默认镜像名：
@@ -42,8 +45,8 @@ stevenissleepy/gpujob-runner:latest
 先构建并加载或推送 `gpu-plugin-controller` 和 `gpujob-runner` 镜像，然后安装 CRD 和 controller：
 
 ```sh
-kubectl apply -f crates/plugin/gpu/deploy/gpu-crds.yaml
-kubectl apply -f crates/plugin/gpu/deploy/gpu-plugin-controller.yaml
+kubectl apply -f deploy/gpu-crds.yaml
+kubectl apply -f deploy/gpu-plugin-controller.yaml
 kubectl get crds
 kubectl get pods -n kube-system -o wide
 ```
@@ -75,7 +78,7 @@ kubectl get hpccredentials
 ## 提交矩阵 Demo
 
 ```sh
-kubectl apply -f crates/plugin/gpu/examples/matrix-demo/gpujob-matrix.yaml
+kubectl apply -f examples/matrix-demo/gpujob-matrix.yaml
 kubectl get gpujobs -A
 kubectl get pods -l gpujob.minik8s.io/name=gpu-matrix -o wide
 ```
@@ -86,15 +89,15 @@ kubectl get pods -l gpujob.minik8s.io/name=gpu-matrix -o wide
 
 ```sh
 kubectl get gpujobs -A
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix --all
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix -o json
+bash scripts/kubectl-gpu-result gpu-matrix
+bash scripts/kubectl-gpu-result gpu-matrix --all
+bash scripts/kubectl-gpu-result gpu-matrix -o json
 ```
 
 CUDA 程序代码路径：
 
 ```text
-crates/plugin/gpu/examples/matrix-demo/matrix_ops.cu
+examples/matrix-demo/matrix_ops.cu
 ```
 
 并发方式：`matrix_add_kernel` 用一维 grid 把每个矩阵元素分配给一个 CUDA thread；`matrix_mul_kernel` 用二维 thread block 计算输出矩阵 tile，并用 shared memory 缓存输入 tile，让多个 block/warp 并发计算不同输出区域。
@@ -132,8 +135,8 @@ export MINIK8S_APISERVER='http://127.0.0.1:8080'
 ### 2. 安装 GPU 插件
 
 ```sh
-kubectl apply -f crates/plugin/gpu/deploy/gpu-crds.yaml
-kubectl apply -f crates/plugin/gpu/deploy/gpu-plugin-controller.yaml
+kubectl apply -f deploy/gpu-crds.yaml
+kubectl apply -f deploy/gpu-plugin-controller.yaml
 kubectl get crds
 kubectl get pods -n kube-system -o wide
 ```
@@ -159,7 +162,7 @@ kubectl get hpccredentials
 ### 4. 提交 GPU 任务
 
 ```sh
-kubectl apply -f crates/plugin/gpu/examples/matrix-demo/gpujob-matrix.yaml
+kubectl apply -f examples/matrix-demo/gpujob-matrix.yaml
 ```
 
 ### 5. 获取任务提交情况
@@ -198,15 +201,15 @@ kubectl get pods -l component=gpujob-runner -A
 任务完成后，runner 会把 Slurm 输出文件写入结果 ConfigMap：
 
 ```sh
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix --all
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix -o json
+bash scripts/kubectl-gpu-result gpu-matrix
+bash scripts/kubectl-gpu-result gpu-matrix --all
+bash scripts/kubectl-gpu-result gpu-matrix -o json
 ```
 
 只看 stdout/stderr：
 
 ```sh
-bash crates/plugin/gpu/scripts/kubectl-gpu-result gpu-matrix
+bash scripts/kubectl-gpu-result gpu-matrix
 ```
 
 实际 ConfigMap key 会按收集到的文件名生成，默认是 `<slurmJobId>.out` 和 `<slurmJobId>.err`；GPU 插件结果查询脚本会自动读取 GPUJob status 中的 `resultConfigMap` 并提取对应输出。

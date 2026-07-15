@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd "$(dirname "$0")/../../../.."
+cd "$(dirname "$0")/.."
 
 image_ref="${IMAGE_REF:-stevenissleepy/gpujob-runner:latest}"
 
