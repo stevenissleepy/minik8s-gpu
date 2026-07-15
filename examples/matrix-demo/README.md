@@ -19,9 +19,9 @@ kubectl get gpujobs -A
 Get returned output:
 
 ```bash
-bash scripts/kubectl-gpu-result gpu-matrix
-bash scripts/kubectl-gpu-result gpu-matrix --all
-bash scripts/kubectl-gpu-result gpu-matrix -o json
+bash scripts/kubectl-gpu-result.sh gpu-matrix
+bash scripts/kubectl-gpu-result.sh gpu-matrix --all
+bash scripts/kubectl-gpu-result.sh gpu-matrix -o json
 ```
 
 The CUDA program uses GPU concurrency by launching many thread blocks:

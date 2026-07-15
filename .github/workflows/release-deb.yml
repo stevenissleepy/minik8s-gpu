@@ -1,0 +1,121 @@
+name: release-deb
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-deb-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release-deb:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Release Tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          asset_prefix="${GITHUB_REPOSITORY#*/}-${tag}-linux-all"
+          dpkg --compare-versions "$version" ge 0
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "asset_prefix=$asset_prefix"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build Debian Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          package="minik8s-gpu"
+          build_dir="target/deb"
+          package_root="${build_dir}/${package}"
+          deb_path="${build_dir}/${package}_${version}_all.deb"
+
+          rm -rf "$package_root"
+          mkdir -p \
+            "$package_root/DEBIAN" \
+            "$package_root/usr/local/bin"
+
+          install -m 0755 scripts/kubectl-gpu-result.sh "$package_root/usr/local/bin/kubectl-gpu-result.sh"
+          installed_size="$(du -sk "$package_root" | awk '{ print $1 }')"
+
+          cat > "$package_root/DEBIAN/control" <<EOF
+          Package: ${package}
+          Version: ${version}
+          Section: admin
+          Priority: optional
+          Architecture: all
+          Maintainer: Minik8s Maintainers <minik8s@example.invalid>
+          Depends: bash, jq
+          Recommends: minik8s
+          Installed-Size: ${installed_size}
+          Description: GPU plugin tools for Minik8s
+           Minik8s GPU provides a command-line helper for reading GPUJob status
+           and result ConfigMaps from a Minik8s cluster.
+          EOF
+
+          dpkg-deb --build --root-owner-group "$package_root" "$deb_path"
+
+      - name: Build Release Assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/dist/minik8s-gpu
+          install -m 0644 \
+            "target/deb/minik8s-gpu_${{ steps.release.outputs.version }}_all.deb" \
+            "target/dist/${{ steps.release.outputs.asset_prefix }}.deb"
+          install -m 0755 scripts/kubectl-gpu-result.sh target/dist/minik8s-gpu/kubectl-gpu-result.sh
+
+          tar -C target/dist \
+            -czf "target/dist/${{ steps.release.outputs.asset_prefix }}.tar.gz" \
+            minik8s-gpu
+
+      - name: Write Checksums
+        shell: bash
+        run: |
+          sha256sum \
+            "target/dist/${{ steps.release.outputs.asset_prefix }}.deb" \
+            "target/dist/${{ steps.release.outputs.asset_prefix }}.tar.gz" \
+            > target/dist/SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          title="${tag}"
+          notes="Automated Minik8s GPU release for ${tag}."
+          files=(
+            "target/dist/${{ steps.release.outputs.asset_prefix }}.deb"
+            "target/dist/${{ steps.release.outputs.asset_prefix }}.tar.gz"
+            "target/dist/SHA256SUMS"
+          )
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "$title" \
+              --notes "$notes"
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" \
+              --title "$title" \
+              --notes "$notes" \
+              "${files[@]}"
+          fi

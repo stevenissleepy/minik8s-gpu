@@ -4,12 +4,12 @@ set -Eeuo pipefail
 usage() {
   cat <<EOF
 Usage:
-  kubectl-gpu-result <gpujob-name> [-n namespace] [--all] [-o json]
+  kubectl-gpu-result.sh <gpujob-name> [-n namespace] [--all] [-o json]
 
 Examples:
-  bash scripts/kubectl-gpu-result gpu-matrix
-  bash scripts/kubectl-gpu-result gpu-matrix --all
-  bash scripts/kubectl-gpu-result gpu-matrix -o json
+  kubectl-gpu-result.sh gpu-matrix
+  kubectl-gpu-result.sh gpu-matrix --all
+  kubectl-gpu-result.sh gpu-matrix -o json
 EOF
 }
 
