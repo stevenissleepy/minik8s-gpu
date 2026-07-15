@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-image_ref="${IMAGE_REF:-stevenissleepy/gpu-plugin-controller:latest}"
+image_ref="${IMAGE_REF:-ghcr.io/stevenissleepy/gpu-plugin-controller:latest}"
 
 cargo build --release -p gpu-plugin-controller
 docker build -t "${image_ref}" -f- . <<'DOCKERFILE'

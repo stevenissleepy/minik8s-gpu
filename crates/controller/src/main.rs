@@ -17,7 +17,7 @@ struct Args {
     #[arg(long)]
     api_server: Option<String>,
 
-    #[arg(long, default_value = "stevenissleepy/gpujob-runner:latest")]
+    #[arg(long, default_value = "ghcr.io/stevenissleepy/gpujob-runner:latest")]
     runner_image: String,
 
     #[arg(long, default_value = "http://127.0.0.1:8080")]

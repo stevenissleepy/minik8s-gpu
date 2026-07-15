@@ -3,7 +3,7 @@
 ## 前置条件
 
 - Minik8s API Server 已启动，`kubectl` 能访问 control-plane。
-- `stevenissleepy/gpu-plugin-controller:latest` 和 `stevenissleepy/gpujob-runner:latest` 已经构建并能被集群拉取。
+- `ghcr.io/stevenissleepy/gpu-plugin-controller:latest` 和 `ghcr.io/stevenissleepy/gpujob-runner:latest` 已经构建并能被集群拉取。
 - 已准备交我算账号、密码或私钥，以及对应 Slurm 分区和账号配置。
 
 ## 安装插件

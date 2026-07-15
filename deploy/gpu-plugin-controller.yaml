@@ -15,9 +15,9 @@ spec:
       effect: NoSchedule
   containers:
     - name: gpu-plugin-controller
-      image: stevenissleepy/gpu-plugin-controller:latest
+      image: ghcr.io/stevenissleepy/gpu-plugin-controller:latest
       command:
         - gpu-plugin-controller
       args:
         - --api-server=$(MINIK8S_APISERVER)
-        - --runner-image=stevenissleepy/gpujob-runner:latest
+        - --runner-image=ghcr.io/stevenissleepy/gpujob-runner:latest
